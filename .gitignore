@@ -1,0 +1,9 @@
+# Python 編譯暫存
+__pycache__/
+*.pyc
+
+# 虛擬環境
+.venv/
+
+# PyCharm 設定
+.idea/
