@@ -60,7 +60,7 @@ for j,k in enumerate(coin):
     row_rate.append([k,buy,sell])
 
 
-save_csv='台銀外匯買入買出.csv'
+save_csv='台銀匯率_20251212.csv'
 with open(save_csv,'w', encoding="utf-8", newline='') as w:
     writer=csv.writer(w)
     writer.writerows(row_rate)
