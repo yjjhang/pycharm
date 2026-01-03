@@ -1,7 +1,9 @@
 from bs4 import BeautifulSoup
 from datetime import date
 import csv
-
+from pathlib import Path
+from Sort_Dir import sort_existing_files
+from Sort_Dir import HTML_DIR
 
 # ✅ 新增：專門讀取本機 HTML 檔案 --------------------------------------
 
@@ -16,7 +18,8 @@ def read_html_file(path: str, encoding: str = "utf-8") -> str:
     回傳:
         str: HTML 原始字串內容
     """
-    with open(path, "r", encoding=encoding) as f:
+    path = Path(path)
+    with path.open("r", encoding=encoding) as f:
         return f.read()
 
 
@@ -124,7 +127,7 @@ def save_rates_csv(html: str) -> str:
         rows.append([cur, cash_buy, cash_sell, spot_buy])
 
     today_str = date.today().strftime("%Y%m%d")
-    csv_name = f"{today_str}_匯率試算表.csv"
+    csv_name = f"{today_str}_台銀匯率試算表.csv"
 
     with open(csv_name, "w", newline="", encoding="utf-8-sig") as f:
         writer = csv.writer(f)
@@ -138,10 +141,14 @@ def save_rates_csv(html: str) -> str:
 
 if __name__ == "__main__":
     # ✅ 你本機已存好的 HTML 檔名（自行改成你的檔案）
-    html = read_html_file("台銀匯率網的網頁.html", encoding="utf-8")
+    html = read_html_file(HTML_DIR / "台銀匯率網的網頁.html", encoding="utf-8")
 
     fname_html = save_html_with_time(html)
     print("已存 HTML 檔：", fname_html)
 
     fname_csv = save_rates_csv(html)
     print("已存 CSV 檔：", fname_csv)
+
+    moved = sort_existing_files(Path.cwd())
+    print(f"[OK] Sort_Dir 歸檔完成，本次移動檔案數：{moved}")
+
