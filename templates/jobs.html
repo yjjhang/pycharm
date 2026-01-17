@@ -1,0 +1,94 @@
+{% extends "base.html" %}
+{% block content %}
+
+<div class="card shadow-sm">
+  <div class="card-body">
+    <form class="row g-2 align-items-end" method="get" action="/jobs">
+      <div class="col-12 col-md-3">
+        <label class="form-label text-white-50">keyword contains</label>
+        <input class="form-control" name="keyword" value="{{ keyword }}" placeholder="e.g. Python / 資料工程">
+      </div>
+      <div class="col-12 col-md-3">
+        <label class="form-label text-white-50">areas contains</label>
+        <input class="form-control" name="areas" value="{{ areas }}" placeholder="e.g. 台北市 / 新北市">
+      </div>
+      <div class="col-12 col-md-3">
+        <label class="form-label text-white-50">snapshot_date</label>
+        <input class="form-control" name="snapshot_date" value="{{ snapshot_date }}" placeholder="YYYY-MM-DD">
+      </div>
+      <div class="col-6 col-md-2">
+        <label class="form-label text-white-50">page_size</label>
+        <input class="form-control" name="page_size" value="{{ page_size }}" type="number" min="5" max="200">
+      </div>
+      <div class="col-6 col-md-1 d-grid">
+        <button class="btn btn-primary" type="submit">Search</button>
+      </div>
+
+      <input type="hidden" name="page" value="1" />
+    </form>
+
+    <div class="d-flex justify-content-between align-items-center mt-3">
+      <div class="text-white-50">
+        Total: <span class="text-white">{{ total }}</span>
+        • Page: <span class="text-white">{{ page }}</span> / <span class="text-white">{{ total_pages }}</span>
+      </div>
+
+      <div class="d-flex gap-2">
+        {% set prev_page = page - 1 %}
+        {% set next_page = page + 1 %}
+        <a class="btn btn-outline-light btn-sm {% if page <= 1 %}disabled{% endif %}"
+           href="/jobs?keyword={{ keyword }}&areas={{ areas }}&snapshot_date={{ snapshot_date }}&page_size={{ page_size }}&page={{ prev_page }}">
+          Prev
+        </a>
+        <a class="btn btn-outline-light btn-sm {% if page >= total_pages %}disabled{% endif %}"
+           href="/jobs?keyword={{ keyword }}&areas={{ areas }}&snapshot_date={{ snapshot_date }}&page_size={{ page_size }}&page={{ next_page }}">
+          Next
+        </a>
+      </div>
+    </div>
+  </div>
+
+  <div class="table-responsive">
+    <table class="table table-dark table-hover align-middle">
+      <thead>
+        <tr class="text-white-50">
+          <th class="mono">id</th>
+          <th>title</th>
+          <th>company</th>
+          <th>location</th>
+          <th>salary</th>
+          <th>post_date</th>
+          <th class="mono">snapshot_time</th>
+          <th class="mono">job_id</th>
+          <th>url</th>
+        </tr>
+      </thead>
+      <tbody>
+      {% for r in items %}
+        <tr>
+          <td class="mono">{{ r.id }}</td>
+          <td style="min-width:260px;">{{ r.title or "" }}</td>
+          <td style="min-width:200px;">{{ r.company or "" }}</td>
+          <td style="min-width:160px;">{{ r.location or "" }}</td>
+          <td style="min-width:140px;">{{ r.salary_text or "" }}</td>
+          <td class="mono" style="min-width:110px;">{{ r.post_date or "" }}</td>
+          <td class="mono" style="min-width:170px;">{{ r.snapshot_time }}</td>
+          <td class="mono" style="min-width:90px;">{{ r.job_id or "" }}</td>
+          <td style="min-width:280px;">
+            {% if r.url %}
+              <a class="link-info" href="{{ r.url }}" target="_blank" rel="noopener">open</a>
+            {% else %}
+              -
+            {% endif %}
+          </td>
+        </tr>
+      {% endfor %}
+      {% if items|length == 0 %}
+        <tr><td colspan="9" class="text-center text-white-50 py-4">No data</td></tr>
+      {% endif %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+{% endblock %}

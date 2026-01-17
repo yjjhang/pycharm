@@ -26,6 +26,7 @@ from bs4 import BeautifulSoup
 
 # ✅ 用「帶 area 的地區頁」當 seed，比沒有帶 area 的 /jobs/main/category/ 穩
 AREA_SEED_URL = "https://www.104.com.tw/jobs/main/category/?area=6001001000&jobsource=category"
+AREA_JSON_URL = "https://static.104.com.tw/category-tool/json/Area.json"
 
 CACHE_FILE = os.path.join(os.path.dirname(__file__), "area_cache_104.json")
 CACHE_MAX_AGE_SECONDS = 30 * 24 * 3600  # 30 天更新一次即可（縣市代碼非常穩）
@@ -101,56 +102,69 @@ def _save_cache(mapping: Dict[str, str]) -> None:
 
 def fetch_area_mapping(timeout: int = 20) -> Dict[str, str]:
     """
-    從 104 地區找工作頁（帶 area 的 seed）抓縣市 -> area code
-    回傳：{"台北市": "6001001000", ...}
+    從 104 的 Area.json 抓「縣市 + 區/鄉鎮」對照表
+    回傳 mapping：
+      - "桃園市" -> "6001005000"
+      - "桃園市龜山區" -> "6001005013"（示例，實際依 Area.json）
     """
     headers = {
         "User-Agent": "Mozilla/5.0",
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept": "application/json, text/plain, */*",
     }
-    r = requests.get(AREA_SEED_URL, headers=headers, timeout=timeout)
+    r = requests.get(AREA_JSON_URL, headers=headers, timeout=timeout)
     r.raise_for_status()
+    data = r.json()
 
-    soup = BeautifulSoup(r.text, "html.parser")
+    # Area.json 通常最外層是 list，且包含 "台灣地區"(no=6001000000)
+    if not isinstance(data, list):
+        return {}
+
+    tw = None
+    for node in data:
+        if isinstance(node, dict) and str(node.get("no")) == "6001000000":
+            tw = node
+            break
+    if not tw:
+        return {}
 
     mapping: Dict[str, str] = {}
 
-    # 解析所有 href 含 area= 的連結
-    for a in soup.find_all("a", href=True):
-        href = a["href"]
-        if "area=" not in href:
+    # 台灣地區底下第一層：縣市
+    cities = tw.get("n") or []
+    if not isinstance(cities, list):
+        return {}
+
+    for c in cities:
+        if not isinstance(c, dict):
             continue
+        city_name = _normalize_text(str(c.get("des") or ""))
+        city_no = str(c.get("no") or "").strip()
+        if city_name and city_no:
+            mapping[city_name] = city_no
 
-        m = re.search(r"[?&]area=([0-9,]+)", href)
-        if not m:
-            continue
+        # 第二層：區/鄉鎮市
+        districts = c.get("n") or []
+        if isinstance(districts, list):
+            for d in districts:
+                if not isinstance(d, dict):
+                    continue
+                dist_name = _normalize_text(str(d.get("des") or ""))
+                dist_no = str(d.get("no") or "").strip()
+                if city_name and dist_name and dist_no:
+                    mapping[city_name + dist_name] = dist_no  # 例如：桃園市龜山區
 
-        area_code = m.group(1).strip()
-        name = _normalize_text(a.get_text())
-        if not name:
-            continue
-
-        # 把像「台北市 119329」這種文字切掉數字，只保留縣市名
-        name = re.sub(r"\d+$", "", name).strip()
-
-        # 只收「台灣縣市」常見格式（避免海外/大陸區塊污染）
-        if name in DEFAULT_TW_AREA_MAP or name.endswith(("市", "縣", "縣市")):
-            mapping.setdefault(name, area_code)
-
-    # 如果抓到的少，回傳空 dict，讓上層走 fallback
-    if len(mapping) < 10:
+    # 太少就視為失敗
+    if len(mapping) < 50:
         return {}
 
     return mapping
 
 
 def get_area_mapping(force_refresh: bool = False) -> Dict[str, str]:
-    """
-    回傳最終 mapping：
+    """回傳最終 mapping：
     - 先嘗試 cache
     - 再嘗試線上抓取
-    - 最後 fallback 內建 DEFAULT_TW_AREA_MAP
-    """
+    - 最後 fallback 內建 DEFAULT_TW_AREA_MAP"""
     if not force_refresh:
         cached = _load_cache()
         if cached:
@@ -168,7 +182,6 @@ def get_area_mapping(force_refresh: bool = False) -> Dict[str, str]:
             return merged
     except Exception:
         pass
-
     # fallback
     return dict(DEFAULT_TW_AREA_MAP)
 
