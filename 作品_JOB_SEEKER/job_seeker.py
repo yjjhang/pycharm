@@ -22,11 +22,17 @@ import time
 from typing import Any, Dict, List
 
 import requests
-
+import urllib.parse
 from area_mapper import resolve_area
 import job_MSSQL_db as job_db
+from playwright.sync_api import sync_playwright
 
-
+UA_104 = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) "
+    "Chrome/122.0.0.0 Safari/537.36"
+)
+UA = UA_104
 def now_tag() -> str:
     return datetime.datetime.now().strftime("%Y%m%d_%H%M")
 
@@ -47,29 +53,209 @@ def build_session() -> requests.Session:
     return s
 
 
+
+
 def fetch_104_jobs_json(session: requests.Session, keyword: str, area_codes_csv: str, page: int = 1, timeout: int = 20) -> Dict[str, Any]:
+    # 1) 先進搜尋頁，讓站點把必要 cookie/token 種進 session
+    session.get(
+        "https://www.104.com.tw/jobs/search/",
+        headers={"User-Agent": UA, "Referer": "https://www.104.com.tw/"},
+        timeout=timeout
+    )
+
+    # 2) 再打 list
     url = "https://www.104.com.tw/jobs/search/list"
     params = {
         "ro": "0",
         "keyword": keyword,
-        "area": area_codes_csv,   # 例如 6001001000 或 6001001000,6001002000
+        "area": area_codes_csv,
         "page": str(page),
         "mode": "s",
-        "order": "15",            # 最近更新（若未來失效可刪）
+        "order": "15",
+
+        # 常見必要參數（沒有就容易被降級回 HTML）
+        "kwop": "7",
+        "expansionType": "area,spec,com,job,wf,wktm",
+        "jobsource": "2018indexpoc",
     }
     headers = {
         "Accept": "application/json, text/plain, */*",
         "Referer": "https://www.104.com.tw/jobs/search/",
+        "User-Agent": UA,
+        "X-Requested-With": "XMLHttpRequest",
+        "Accept-Language": "zh-TW,zh;q=0.9,en;q=0.8",
     }
 
-    r = session.get(url, params=params, headers=headers, timeout=timeout)
+    r = session.get(url, params=params, headers=headers, timeout=timeout, allow_redirects=True)
 
-    if r.status_code == 403:
-        raise RuntimeError("HTTP 403：104 阻擋此請求（通常降頻、稍後再試即可）。")
+    # 3) 只要回 HTML，就代表仍被降級（等同「拿不到 JSON」）
+    ctype = (r.headers.get("Content-Type") or "").lower()
+    if "text/html" in ctype or r.text.lstrip().startswith("<!DOCTYPE html"):
+        raise RuntimeError(f"104 回傳 HTML（未取得 JSON）。\nstatus={r.status_code}\nfinal_url={r.url}\nhead={r.text[:120]}")
 
     r.raise_for_status()
     return r.json()
+def _looks_like_joblist_json(obj: Any) -> bool:
+    """只用結構判斷：是不是「職缺清單」JSON。"""
+    if not isinstance(obj, dict):
+        return False
+    data = obj.get("data")
+    if not isinstance(data, list) or not data:
+        return False
+    first = data[0]
+    if not isinstance(first, dict):
+        return False
+    # 104 職缺清單常見欄位（你截圖就有這些）
+    if ("jobName" in first) or ("jobNo" in first) or ("custName" in first):
+        return True
+    if isinstance(first.get("link"), dict) and ("job" in first["link"]):
+        return True
+    return False
+def fetch_jobs_via_playwright(
+    keyword: str,
+    area_text: str = "",
+    max_pages: int = 3,
+    area_codes_csv: Optional[str] = None,
+    headless: bool = True,
+    timeout_ms: int = 30000,
+) -> List[Dict[str, str]]:
+    """
+    104 職缺抓取（Playwright 穩定版）：
+    - 不點 input、不點地區 combobox
+    - 直接用 URL 進入搜尋結果頁（避免 /jobs/search/list HTML/404）
+    - 監聽所有 JSON response，用結構判斷抓到「職缺清單 data[]」
+    - 回傳：你 UI 目前用的 rows 格式（title/company/salary_text/location/url...）
+    """
 
+    keyword = (keyword or "").strip()
+    if not keyword:
+        return []
+
+    # 若沒給 area_codes_csv，就嘗試用你既有 resolve_area 轉
+    # （失敗就當作不指定地區；避免再卡 UI selector）
+    if area_codes_csv is None:
+        area_codes_csv = ""
+        try:
+            if area_text and area_text.strip() and "resolve_area" in globals():
+                parts = [a.strip() for a in area_text.replace("，", ",").split(",") if a.strip()]
+                codes = []
+                for p in parts:
+                    r = resolve_area(p)  # 你原本就有
+                    codes.append(r.area_code)
+                area_codes_csv = ",".join(codes)
+        except Exception:
+            area_codes_csv = ""
+
+    # 收集到的原始 items
+    all_items: List[Dict[str, Any]] = []
+    seen_keys = set()
+
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=headless)
+        ctx = browser.new_context(
+            locale="zh-TW",
+            user_agent=UA_104,
+            viewport={"width": 1280, "height": 720},
+        )
+        page = ctx.new_page()
+
+        # 監聽 JSON responses，只要結構像 joblist 就收
+        last_job_json: Dict[str, Any] = {}
+
+        def on_response(resp):
+            nonlocal last_job_json
+            try:
+                ct = (resp.headers.get("content-type") or "").lower()
+                if "application/json" not in ct:
+                    return
+                j = resp.json()
+                if _looks_like_joblist_json(j):
+                    last_job_json = j
+            except Exception:
+                return
+
+        page.on("response", on_response)
+
+        # 逐頁進入搜尋頁，等待 joblist JSON 被捕捉
+        for page_no in range(1, max_pages + 1):
+            # 直接組搜尋 URL（不使用 _build_search_url，避免你剛剛的 NameError）
+            params = {
+                "jobsource": "joblist_search",
+                "keyword": keyword,
+                "page": str(page_no),
+                "order": "15",
+            }
+            if area_codes_csv:
+                params["area"] = area_codes_csv
+
+            url = "https://www.104.com.tw/jobs/search/?" + urllib.parse.urlencode(params, safe=",")
+            last_job_json = {}
+
+            page.goto(url, wait_until="domcontentloaded")
+
+            # 等待最多 timeout_ms：直到捕捉到 joblist JSON
+            t0 = time.time()
+            while True:
+                if last_job_json and _looks_like_joblist_json(last_job_json):
+                    break
+                if (time.time() - t0) * 1000 > timeout_ms:
+                    break
+                page.wait_for_timeout(200)
+
+            if not last_job_json or not _looks_like_joblist_json(last_job_json):
+                # 這頁抓不到就停（避免一直卡）
+                break
+
+            items = last_job_json.get("data", [])
+            if not items:
+                break
+
+            added = 0
+            for it in items:
+                if not isinstance(it, dict):
+                    continue
+                job_no = str(it.get("jobNo") or "")
+                cust_no = str(it.get("custNo") or "")
+                key = job_no + "|" + cust_no
+                if key and key in seen_keys:
+                    continue
+                if key:
+                    seen_keys.add(key)
+                all_items.append(it)
+                added += 1
+
+            if added == 0:
+                break
+
+        browser.close()
+
+    # 交給你原本 normalize_jobs（若存在）統一欄位
+    payload = {"data": all_items}
+
+    if "normalize_jobs" in globals():
+        try:
+            rows = normalize_jobs(payload)
+            if isinstance(rows, list):
+                return rows
+        except Exception:
+            pass
+
+    # 保底轉換：至少 UI/CSV 可用
+    out: List[Dict[str, str]] = []
+    for it in all_items:
+        link_job = ""
+        if isinstance(it.get("link"), dict):
+            link_job = it["link"].get("job", "") or ""
+        out.append({
+            "job_id": str(it.get("jobNo") or ""),
+            "title": str(it.get("jobName") or ""),
+            "company": str(it.get("custName") or ""),
+            "location": str(it.get("jobAddrNoDesc") or ""),
+            "salary_text": str(it.get("salaryDesc") or it.get("salary") or ""),
+            "post_date": str(it.get("appearDate") or ""),
+            "url": link_job,
+        })
+    return out
 
 def normalize_jobs(payload: Dict[str, Any]) -> List[Dict[str, str]]:
     data = payload.get("data") or {}

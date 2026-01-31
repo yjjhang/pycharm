@@ -4,8 +4,8 @@
 
 # -*- coding: utf-8 -*-
 """
-職缺蒐尋器_UI.py
-- 匯入你的「職缺蒐尋器.py / 職缺搜尋器.py」使用原本抓取/解析/輸出 CSV
+job_seeker_UI.py
+- 匯入你的「職缺蒐尋器.py / job_seeker.py」使用原本抓取/解析/輸出 CSV
 - 預覽區改成 ttk.Treeview（類似 C# DataGridView），只顯示前 N 筆概略欄位
 """
 
@@ -15,16 +15,22 @@ import time
 import threading
 import queue
 import importlib.util
-from typing import List, Dict, Optional
+import webbrowser
+import urllib.request
+import subprocess
 
+from typing import List, Dict, Optional
 import tkinter as tk
 from tkinter import messagebox, filedialog
 from tkinter import ttk
-
+from urllib.error import URLError
 
 # -------------------------
 # 動態載入（支援中文檔名）
 # -------------------------
+
+FLASK_URL = "http://127.0.0.1:5000/"
+
 def load_job_module() -> object:
     base_dir = os.path.dirname(os.path.abspath(__file__))
 
@@ -32,7 +38,7 @@ def load_job_module() -> object:
     if base_dir not in sys.path:
         sys.path.insert(0, base_dir)
 
-    candidates = ["職缺蒐尋器.py", "職缺搜尋器.py"]
+    candidates = ["job_seeker.py"]
     py_path: Optional[str] = None
     for fn in candidates:
         p = os.path.join(base_dir, fn)
@@ -54,7 +60,6 @@ def load_job_module() -> object:
     spec.loader.exec_module(mod)
     return mod
 
-
 # -------------------------
 # Entry Placeholder
 # -------------------------
@@ -69,6 +74,8 @@ class PlaceholderEntry(tk.Entry):
         self.bind("<FocusIn>", self._on_focus_in)
         self.bind("<FocusOut>", self._on_focus_out)
         self._set_placeholder()
+
+
 
     def _set_placeholder(self):
         self.delete(0, tk.END)
@@ -117,6 +124,23 @@ class JobSearchUI(tk.Tk):
         self._build_ui()
         self.after(120, self._poll_queue)
 
+        self.flask_url = "http://127.0.0.1:5000/"
+
+        # 取得目前 UI 這支 .py 所在資料夾 = 專案根目錄（你的檔案都放同層時最準）
+        this_dir = os.path.dirname(os.path.abspath(__file__))
+
+        # 如果旁邊存在 作品_JOB_SEEKER 這個資料夾，就把它當專案根目錄
+        proj_dir = os.path.join(this_dir, "作品_JOB_SEEKER")
+        if os.path.isdir(proj_dir):
+            self.base_dir = proj_dir
+        else:
+            # 如果你本來就已經在作品資料夾內執行，就用目前資料夾
+            self.base_dir = this_dir
+
+        # CSV 輸出資料夾
+        self.csv_dir = os.path.join(self.base_dir, "csv_file")
+        os.makedirs(self.csv_dir, exist_ok=True)
+
     def _build_ui(self):
         frm = tk.Frame(self)
         frm.pack(fill="x", padx=12, pady=10)
@@ -136,8 +160,14 @@ class JobSearchUI(tk.Tk):
         btnfrm = tk.Frame(self)
         btnfrm.pack(fill="x", padx=12)
 
-        self.btn_export = tk.Button(btnfrm, text="3. 匯出成 CSV（並顯示預覽）", command=self.on_export_clicked)
+        self.btn_export = tk.Button(btnfrm, text="匯出成 CSV（並顯示預覽）", command=self.on_export_clicked)
         self.btn_export.pack(side="left")
+
+        self.btn_open_folder = tk.Button(btnfrm, text="瀏覽 CSV 檔案", command=self.on_open_csv_folder_clicked)
+        self.btn_open_folder.pack(side="left", padx=8)
+
+        self.btn_web = tk.Button(btnfrm, text="開啟 Web 版", command=self.on_open_web_clicked)
+        self.btn_web.pack(side="left", padx=8)
 
         self.lbl_status = tk.Label(btnfrm, text="狀態：待命", fg="#333")
         self.lbl_status.pack(side="left", padx=12)
@@ -232,6 +262,19 @@ class JobSearchUI(tk.Tk):
                 tags=(tag,)
             )
 
+    def on_open_csv_folder_clicked(self):
+        try:
+            os.startfile(self.csv_dir)  # Windows 直接開資料夾
+        except Exception:
+            subprocess.Popen(["explorer", self.csv_dir])
+
+    def on_open_web_clicked(self):
+        try:
+            urllib.request.urlopen(self.flask_url, timeout=1)
+            webbrowser.open_new_tab(self.flask_url)
+        except URLError:
+            messagebox.showerror("Web 版未啟動", "Flask 伺服器尚未啟動，請先執行 flask_demo.py")
+
     def on_export_clicked(self):
         keyword = self.ent_keyword.get_value()
         areas_text = self.ent_area.get_value()
@@ -251,15 +294,16 @@ class JobSearchUI(tk.Tk):
         area_names = ",".join(r.matched_name for r in resolved)
 
         out_name = f"{self.job_mod.now_tag()}_104_{self.job_mod.safe_filename(keyword)}_{self.job_mod.safe_filename(area_names)}.csv"
-        save_path = filedialog.asksaveasfilename(
-            title="選擇匯出 CSV 路徑",
-            defaultextension=".csv",
-            initialfile=out_name,
-            filetypes=[("CSV files", "*.csv"), ("All files", "*.*")]
-        )
-        if not save_path:
-            return
-
+        save_path = os.path.join(self.csv_dir, out_name)
+        if os.path.exists(save_path):
+            name, ext = os.path.splitext(out_name)
+            k = 1
+            while True:
+                candidate = os.path.join(self.csv_dir, f"{name}_{k:02d}{ext}")
+                if not os.path.exists(candidate):
+                    save_path = candidate
+                    break
+                k += 1
         self.btn_export.config(state="disabled")
         self.set_status("查詢中…")
         self._clear_table()
@@ -273,31 +317,58 @@ class JobSearchUI(tk.Tk):
 
     def _worker_fetch_and_export(self, save_path: str, keyword: str, area_names: str, area_codes_csv: str):
         try:
-            session = self.job_mod.build_session()
             max_pages = 3
-            page_sleep = 1.2
 
-            all_rows: List[Dict[str, str]] = []
-            for page in range(1, max_pages + 1):
-                payload = self.job_mod.fetch_104_jobs_json(
-                    session, keyword=keyword, area_codes_csv=area_codes_csv, page=page
-                )
-                rows = self.job_mod.normalize_jobs(payload)
-                if not rows:
-                    break
-                all_rows.extend(rows)
-                time.sleep(page_sleep)
+            # ✅ 只走 Playwright
+            all_rows = self.job_mod.fetch_jobs_via_playwright(
+                keyword=keyword,
+                area_text=area_names,
+                area_codes_csv=area_codes_csv,
+                max_pages=max_pages,
+                headless=False,
+                timeout_ms=45000
+            )
 
             if not all_rows:
-                self._q.put(("error", "沒抓到任何職缺（條件太嚴格或暫時被限制）。"))
+                self._q.put(("error", "Playwright 沒抓到任何職缺（可能 104 當下限制或條件太嚴格）。"))
                 return
 
-            # 寫 CSV
+            # 1) 寫 CSV
             self.job_mod.write_csv(all_rows, save_path, keyword=keyword, areas_text=area_names)
 
-            # 更新表格預覽（丟整包 rows 給 UI）
+            # 2) ✅ 寫入 MSSQL（使用你現成的 insert_snapshot_rows）
+            try:
+                from job_MSSQL_db import insert_snapshot_rows
+
+                # 嘗試從主程式取得 conn_str（你不需要改 DB 模組）
+                conn_str = ""
+                if hasattr(self.job_mod, "CONN_STR"):
+                    conn_str = getattr(self.job_mod, "CONN_STR") or ""
+                elif hasattr(self.job_mod, "conn_str"):
+                    conn_str = getattr(self.job_mod, "conn_str") or ""
+                elif hasattr(self.job_mod, "get_conn_str"):
+                    conn_str = self.job_mod.get_conn_str() or ""
+
+                if not conn_str.strip():
+                    raise RuntimeError("找不到 MSSQL 連線字串（請在主程式提供 CONN_STR 或 get_conn_str()）。")
+
+                inserted = insert_snapshot_rows(
+                    rows=all_rows,
+                    keyword=keyword,
+                    areas=area_names,
+                    conn_str=conn_str,
+                    snapshot_time=None
+                )
+
+                self._q.put(("status", f"MSSQL：新增 {inserted} 筆（同日重複 job_id 不會更新快照，屬既有設計）"))
+
+            except Exception as e:
+                self._q.put(("status", f"MSSQL 寫入失敗（不影響 CSV/預覽）：{e}"))
+
+            # 3) 更新 UI
             self._q.put(("rows", all_rows))
             self._q.put(("done", f"匯出成功：\n{save_path}\n\n共 {len(all_rows)} 筆（CSV 為完整資料）"))
+
         except Exception as e:
             self._q.put(("error", str(e)))
         finally:
@@ -316,13 +387,17 @@ class JobSearchUI(tk.Tk):
                     messagebox.showerror("錯誤", payload)
                 elif typ == "enable":
                     self.btn_export.config(state="normal")
+                elif typ == "status":
+                    self.set_status(payload)
         except queue.Empty:
             pass
         finally:
             self.after(120, self._poll_queue)
 
 
+
 if __name__ == "__main__":
+
     app = JobSearchUI()
     app.mainloop()
 

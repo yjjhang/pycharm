@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>104 職缺蒐尋器流程圖（PPT 清晰版）</title>
+  <style>
+    body{
+      font-family: "Microsoft JhengHei","Noto Sans TC",Arial,sans-serif;
+      margin: 16px;
+      background: #fff;
+    }
+    .hint{
+      color:#444;
+      font-size: 14px;
+      margin: 0 0 10px 0;
+      padding: 8px 10px;
+      border-left: 4px solid #3b82f6;
+      background: #f5f9ff;
+    }
+    #wrap{
+      width: 1600px;   /* PPT 16:9 很好截。要更大改 1800/2000 */
+      margin: 0 auto;
+    }
+    #diagram{
+      width: 1600px;
+      min-height: 640px;
+      border: 1px solid #ddd;
+      padding: 14px;
+      box-sizing: border-box;
+      background: #fff;
+      overflow: visible;
+    }
+  </style>
+</head>
+<body>
+  <div class="hint">提示：此版本移除「長回線」，避免圖被擠在最上方；適合直接截圖放 PPT。</div>
+
+  <div id="wrap">
+    <div id="diagram"></div>
+  </div>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/raphael/2.3.0/raphael.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/flowchart/1.18.0/flowchart.min.js"></script>
+
+  <script>
+    var diagramText = `
+st=>start: 開始
+in=>inputoutput: 輸入：關鍵字 + 地區\\n(可到區/鄉鎮)
+v=>condition: 輸入有效?
+map=>operation: 載入地區映射\\n(快取 / Area.json)
+res=>operation: 解析地區→area code
+fetch=>operation: 取得職缺資料(JSON)\\n(API/攔截，分頁)
+has=>condition: 有職缺?
+csv=>operation: 輸出 CSV
+db=>operation: 寫入資料庫(快照)
+diff=>operation: 比較今天 vs 昨天
+show=>operation: 顯示差異 + 預覽前10
+newq=>condition: 有新增職缺?
+newshow=>operation: 顯示新增(前10)
+
+err=>end: 結束(顯示錯誤)
+none=>end: 結束(顯示無職缺)
+end=>end: 結束
+
+// 上排（控制在合理寬度）
+st(right)->in(right)->v
+v(yes,right)->map(right)->res(right)->fetch(right)->has
+
+// 失敗分支：各自結束（避免長回線）
+v(no,top)->err
+has(no,top)->none
+
+// 成功分支：下排
+has(yes,bottom)->csv(right)->db(right)->diff(right)->show(right)->newq
+newq(yes,right)->newshow(right)->end
+newq(no,top)->end
+`;
+
+    var diagram = flowchart.parse(diagramText);
+    diagram.drawSVG('diagram', {
+      'line-width': 2,
+      'line-length': 28,
+      'text-margin': 10,
+      'font-size': 18,
+      'font': 'Microsoft JhengHei, Noto Sans TC, Arial',
+      'yes-text': '是',
+      'no-text': '否',
+      'arrow-end': 'block',
+      'scale': 1.1
+    });
+  </script>
+</body>
+</html>
