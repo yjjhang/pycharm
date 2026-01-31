@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Flowchart.js Viewer (Import .txt)</title>
+
+  <!-- flowchart.js + raphael (CDN) -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/raphael/2.3.0/raphael.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/flowchart/1.17.1/flowchart.min.js"></script>
+
+  <style>
+    body { font-family: Arial, "Microsoft JhengHei", sans-serif; margin: 16px; }
+    .row { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+    textarea { width: 100%; height: 220px; font-family: Consolas, monospace; }
+    #diagram {
+  width: 100%;
+  min-height: 520px;     /* ✅ 給圖一個基本高度 */
+  overflow: auto;
+  border: 1px solid #ddd;
+  padding: 12px;
+  margin-top: 12px;
+}
+    button { padding: 8px 12px; cursor: pointer; }
+    .hint { color: #666; font-size: 12px; }
+  </style>
+</head>
+
+<body>
+  <h3>Flowchart.js 匯入文字檔自動生成流程圖</h3>
+
+  <div class="row">
+    <input id="file" type="file" accept=".txt,.flow,.fc,.md" />
+    <button id="btnRender">Render</button>
+    <button id="btnDownloadSvg">Download SVG</button>
+  </div>
+
+  <p class="hint">
+    用法：選擇你的流程圖文字檔（st=>start/op=>operation 那種）→ Render → 下面就會出圖。<br>
+    若要離線無網路：把 flowchart.js/raphael 下載到本機後改成本地引用即可。
+  </p>
+
+  <textarea id="src" placeholder="也可以直接貼 flowchart.js DSL 在這裡..."></textarea>
+
+  <div id="diagram"></div>
+
+  <script>
+    const fileInput = document.getElementById("file");
+    const src = document.getElementById("src");
+    const diagramDiv = document.getElementById("diagram");
+
+    function render() {
+      diagramDiv.innerHTML = "";
+      const code = src.value.trim();
+      if (!code) return;
+
+      try {
+        const chart = flowchart.parse(code);
+        // 你也可以調整 'x','y','line-width','font-size' 等參數
+        chart.drawSVG(diagramDiv, {
+  'line-width': 2,
+  'line-length': 18,
+  'text-margin': 6,
+  'font-size': 14,
+  'font-family': 'Microsoft JhengHei, Arial',
+  'arrow-end': 'block',
+  'yes-text': '',   // ✅ 不顯示「是」
+  'no-text': ''     // ✅ 不顯示「否」
+});
+      } catch (err) {
+        diagramDiv.innerHTML = "<pre style='color:red;white-space:pre-wrap;'></pre>";
+        diagramDiv.querySelector("pre").textContent = String(err);
+      }
+    }
+
+    fileInput.addEventListener("change", async () => {
+      const f = fileInput.files && fileInput.files[0];
+      if (!f) return;
+      src.value = await f.text();
+      render();
+    });
+
+    document.getElementById("btnRender").addEventListener("click", render);
+
+    document.getElementById("btnDownloadSvg").addEventListener("click", () => {
+      const svg = diagramDiv.querySelector("svg");
+      if (!svg) return;
+
+      const blob = new Blob([svg.outerHTML], { type: "image/svg+xml;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "flowchart.svg";
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+
+      URL.revokeObjectURL(url);
+    });
+  </script>
+</body>
+</html>

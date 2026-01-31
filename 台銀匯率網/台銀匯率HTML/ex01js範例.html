@@ -1,0 +1,19 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <title>簡單範例</title>
+</head>
+<body>
+    <button onclick="sayHello()">按我</button>
+    <!-- 文字顯示的位置 -->
+    <p id="message"></p>
+
+    <script>
+        function sayHello() {
+            // 把文字放到 <p> 裡
+            document.getElementById('message').textContent = '歡迎光臨';
+        }
+    </script>
+</body>
+</html>

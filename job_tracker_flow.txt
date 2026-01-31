@@ -1,0 +1,28 @@
+st=>start: 開始
+e=>end: 結束
+
+io=>inputoutput: 輸入：職缺關鍵字 + 縣市(可多個)
+cond0=>condition: 輸入是否完整？
+op0=>operation: 提示錯誤後結束
+
+op1=>operation: 地區轉換(area_mapper)\n中文縣市 -> 104 地區代碼
+cond1=>condition: 地區轉換成功？
+op1e=>operation: 提示地區錯誤後結束
+
+op2=>operation: 抓職缺(job_tracker_104)\n呼叫 104 JSON API(分頁)
+cond2=>condition: 有抓到職缺？
+op2e=>operation: 提示沒資料後結束
+
+op3=>operation: 整理職缺資料\n統一欄位格式
+op4=>operation: 輸出 CSV 快照
+op5=>operation: 寫入資料庫(job_MSSQL_db)\n存每日快照
+op6=>operation: 比對差異(job_MSSQL_db)\n今天 vs 昨天 新增/消失
+op7=>operation: 顯示預覽與新增清單
+
+st->io->cond0
+cond0(否)->op0->e
+cond0(是)->op1->cond1
+cond1(否)->op1e->e
+cond1(是)->op2->cond2
+cond2(否)->op2e->e
+cond2(是)->op3->op4->op5->op6->op7->e
